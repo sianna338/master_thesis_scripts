@@ -1,0 +1,162 @@
+%% this tests the accurary of phase dependent stimulation for single and paired pulses
+
+clc 
+clear all; 
+close all; 
+
+% fieldtrip
+path_ft   = 'C:\Users\siann\Downloads\fieldtrip-20231113\fieldtrip-20231113';
+addpath(path_ft);
+ft_defaults;
+
+sf = 5000; 
+
+datapath = 'C:\Users\siann\Data\spindle_ppTMS\EEG'
+subjects = {'sub-02'}
+session = {'ses-exp_01', 'ses-exp_02', 'ses-exp_03'}
+
+% define conditions
+condition_peak = 'S155'
+condition_trough = 'S156'
+condition_rising = 'S157'
+condition_falling = 'S158'
+condition_sp_free = 'S159'
+%% main analysis
+% look at markers in dataset and segment based on markers
+for isub=1:length(subjects)
+    for ises=1:length(session)
+        cfg = [];
+        cfg.datafile = [datapath, filesep, subjects{isub}, filesep, session{ises}, filesep, 'spindle-ppTMS_', subjects{isub}, '_', session{ises}, '.eeg']
+        cfg.headerfile = [datapath, filesep, subjects{isub}, filesep, session{ises}, filesep, 'spindle-ppTMS_', subjects{isub}, '_', session{ises}, '.vhdr']
+        cfg.continous = 'yes';
+        cfg.trialdef.prestim = 0.3
+        cfg.trialdef.poststim = 0.3
+        cfg.trialdef.eventtype = 'Stimulus';
+        cfg.trialdef.eventvalue = {condition_peak, condition_trough, condition_falling,...
+            condition_rising, condition_sp_free}
+        cfg = ft_definetrial(cfg);
+        trial_matrix = cfg.trl
+   
+
+        % read-in data and filter
+        % cfg = []; 
+        cfg.channel = {'C4', 'TP9'};
+        cfg.reref = 'yes'
+        cfg.refchannel = 'TP9'
+        % cfg.bpfilter = 'yes'
+        % cfg.bpfiltord = 2
+        % cfg.bpfreq = [10.9 14.9]
+        % cfg.bpfiltdir = 'twopass'
+        data_raw_c4= ft_preprocessing(cfg);
+        save([datapath, filesep, subjects{isub}, filesep, session{ises}, filesep, 'data_', subjects{isub}, '_', session{ises}, '_C4'], "data_raw_c4", '-v7.3')
+    end
+end 
+
+data_C4_ses01 = load([datapath, filesep, subjects{isub}, filesep, session{1}, filesep, 'data_', subjects{isub}, '_', session{1}, '_C4'])
+data_C4_ses02 = load([datapath, filesep, subjects{isub}, filesep, session{2}, filesep, 'data_', subjects{isub}, '_', session{2}, '_C4'])
+data_C4_ses03 = load([datapath, filesep, subjects{isub}, filesep, session{3}, filesep, 'data_', subjects{isub}, '_', session{3}, '_C4'])
+data_C4_all_ses = [data_C4_ses01.data_raw_c4.trial data_C4_ses02.data_raw_c4.trial data_C4_ses03.data_raw_c4.trial]
+data_C4_all_ses_trialinfo = zeros(length(data_C4_all_ses),1)
+data_C4_all_ses_trialinfo = [data_C4_ses01.data_raw_c4.trialinfo; data_C4_ses02.data_raw_c4.trialinfo; data_C4_ses03.data_raw_c4.trialinfo]
+
+
+% filter the data in the spindle frequency range
+% for itrial=1:length(data_C4_all_ses)
+%     data_C4_all_ses{itrial} = bandpass(data_C4_all_ses{itrial}(1,:),[12 15],sf)
+% end 
+
+
+
+%% extract the phase for each trial
+xh = zeros(length(data_C4_all_ses),length(data_C4_all_ses{1}(1,:)))
+xphase = zeros(length(data_C4_all_ses),length(data_C4_all_ses{1}(1,:)))
+xphase_unwrap = zeros(length(data_C4_all_ses),length(data_C4_all_ses{1}(1,:)))
+for itrial = 1:length(data_C4_all_ses)
+    xh(itrial, :) = hilbert(data_C4_all_ses{itrial}(1,:));
+    xphase_unwrap(itrial, :) = (unwrap(angle(xh(itrial,:))));
+    xphase(itrial, :) = angle(xh(itrial,:))
+end 
+
+%wrap to -1.5*pi .. 0.5*pi 
+% estphase = xphase
+% estphase(estphase > 0.5*pi) = estphase(estphase > 0.5*pi)-(2*pi);
+
+% get phase for each condition 
+conditions = {condition_peak, condition_trough, condition_rising,...
+            condition_falling, condition_sp_free}
+trials = cell(1, numel(conditions));
+trials_unwrap = cell(1, numel(conditions));
+for i = 1:numel(conditions)
+    trials{i} = xphase(data_C4_all_ses_trialinfo == str2double(conditions{i}(2:end)),:)
+    trials_unwrap{i} = xphase_unwrap(data_C4_all_ses_trialinfo == str2double(conditions{i}(2:end)),:)
+end
+
+trials_peak = trials{1} 
+trials_trough = trials{2}
+trials_rising = trials{3} 
+trials_falling = trials{4} 
+trials_post = trials{5}
+trials_peak_unwrap = trials_unwrap{1} 
+trials_trough_unwrap = trials_unwrap{2}
+trials_falling_unwrap = trials_unwrap{3} 
+trials_rising_unwrap = trials_unwrap{4}
+trials_post_unwrap = trials_unwrap{5}
+%% plot 
+% for not unwrapped phase 
+plot_positions = [0.5, 1, 1.5, 2, 2.5]
+colors = {'.g', '.b', '.r', '.k', '.y'}
+figure;
+for i=1:numel(conditions)
+    for itrial = 1:size(trials{i},1)
+        h(i) = plot(plot_positions(i), trials{i}(itrial, 1450), colors{i}, 'MarkerSize', 10)
+        hold on; 
+    end 
+end 
+
+xlim([0.4 2.6])
+ylim([-pi pi]); 
+xlabel('targeted phase', 'FontSize', 12); 
+ylabel('estimated phase (radians)', 'FontSize', 12); 
+title('Estimated Phase vs. Targeted Phase', 'FontSize', 14); 
+h = legend(h, {'Peak', 'Trough', 'Rising', 'Falling', 'Post'}, ...
+           'FontSize', 10, 'Location', 'best'); 
+grid on; 
+
+
+% for unwrapped phase 
+% plot_positions = [0.5, 1, 1.5, 2]
+% colors = {'.g', '.b', '.r', '.k'}
+figure;
+for i=1:numel(conditions)
+    for itrial = 1:size(trials{i},1)
+        h(i) = plot(plot_positions(i), trials_unwrap{i}(itrial, 1450), colors{i}, 'MarkerSize', 10)
+        hold on; 
+    end 
+end  
+hold on; 
+t = linspace(0, 2*pi, 1000);
+x = (28-24)/2 * cos(t) + (28+24)/2; % create cosine wave for reference 
+plot(t/pi + 0.5, x, 'LineWidth', 1.5, 'Color', [0.5, 0.5, 0.5]); 
+xlim([0.4 2.6])
+xlabel('targeted phase', 'FontSize', 12); 
+ylabel('estimated phase (radians)', 'FontSize', 12); 
+title('Comparison of Estimated Phase (unwrapped) with Cosine Wave', 'FontSize', 14); 
+h = legend(h, {'Peak', 'Trough', 'Rising', 'Falling', 'Post'}, ...
+           'FontSize', 10, 'Location', 'best')
+grid on; 
+
+%% circular plots
+figure;
+titles = {'peak stimulation', 'trough stimulation', 'rising flank stimulation', ...
+    'falling flank stimulation'}
+for i=1:numel(conditions)-1
+    subplot(2,2,i)
+    std_peak = circ_std(trials{i}(:, 1500), [], [], 1)
+    mean_peak = circ_mean(trials{i}(:, 1500))
+    circ_plot(trials{i}(:, 1500), 'pretty', 'bo', true,'linewidth',2,'color','b')
+    hold on; 
+    text(1.3, 0.8, sprintf('SD: %.2f\nMean: %.2f', std_peak, mean_peak), 'FontSize', 10);
+    hold off; 
+    title(titles{i}, 'Position',[0.2 1.27])
+    % text(3, 0.2, ['RMS = 12.6'])
+end 

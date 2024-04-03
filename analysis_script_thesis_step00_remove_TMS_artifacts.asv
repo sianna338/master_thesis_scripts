@@ -1,0 +1,272 @@
+clc 
+clear all; 
+close all; 
+
+% fieldtrip
+path_ft   = 'C:\Users\siann\Downloads\fieldtrip-20231113\fieldtrip-20231113';
+addpath(path_ft);
+ft_defaults;
+
+sf = 5000; 
+
+datapath = 'C:\Users\siann\Data\spindle_ppTMS\EEG'
+subjects = {'sub-02'}
+session = {'ses-exp_01', 'ses-exp_02', 'ses-exp_03'}
+
+% define conditions
+condition_peak = 'S155'
+condition_trough = 'S156'
+condition_rising = 'S157'
+condition_falling = 'S158'
+condition_sp_free = 'S159'
+ 
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% STEP 1: LOAD IN DATA %%%%%%%%%%%%%%%%%
+% look at markers in dataset and segment based on markers
+for isub=1:length(subjects)
+    for ises=1:length(session)
+        cfg = [];
+        cfg.datafile = [datapath, filesep, subjects{isub}, filesep, session{ises}, filesep, 'spindle-ppTMS_', subjects{isub}, '_', session{ises}, '.eeg']
+        cfg.headerfile = [datapath, filesep, subjects{isub}, filesep, session{ises}, filesep, 'spindle-ppTMS_', subjects{isub}, '_', session{ises}, '.vhdr']
+        cfg.continous = 'yes';
+        cfg.trialdef.prestim = 0.3
+        cfg.trialdef.poststim = 1
+        cfg.trialdef.eventtype = 'Stimulus';
+        cfg.trialdef.eventvalue = {condition_peak, condition_trough, condition_falling,...
+            condition_rising, condition_sp_free}
+        cfg = ft_definetrial(cfg);
+        trial_matrix = cfg.trl
+   
+
+        % read-in data 
+        % cfg = []; 
+        % cfg.channel = {'C4', 'TP9'};
+        % cfg.reref = 'yes'
+        % cfg.refchannel = 'TP9'
+        data_raw_c4 = ft_preprocessing(cfg);
+        save([datapath, filesep, subjects{isub}, filesep, session{ises}, filesep, 'data_', subjects{isub}, '_', session{ises}, '_C4'], "data_raw_c4", '-v7.3')
+    end
+
+    data_to_append = cell(length(session), 1); 
+    for ises = 1:length(session)
+        datafile = fullfile(datapath, subjects{isub}, session{ises}, ['data_', subjects{isub}, '_', session{ises}, '_C4.mat']);
+        loaded_data = load(datafile, "data_raw_c4");
+        data_to_append{ises} = loaded_data.data_raw_c4;
+    end
+    cfg = [];
+    data_merged = ft_appenddata(cfg, data_to_append{:}); % merge all three datasets
+    save([datapath, filesep, subjects{isub}, filesep, 'data_', subjects{isub}, 'allses_merged'], "data_merged", '-v7.3')
+
+    for i=11:size(data_merged.sampleinfo,1)-10
+        data_merged.sampleinfo(i,:) = data_merged.sampleinfo(10,:) + data_merged.sampleinfo(i,:)
+    end 
+    
+    for i=72:size(data_merged.sampleinfo,1)
+        data_merged.sampleinfo(i,:) = data_merged.sampleinfo(72,:) + data_merged.sampleinfo(i,:)
+    end 
+
+    cfg = []
+    cfg.resamplefs = 100
+    data_merged_resampled
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% STEP 2: Create Event-locked averages %%%%%%%%%%%%%%%%%
+    cfg = [];
+    cfg.preproc.demean = 'yes';
+    cfg.preproc.baselinewindow = [-0.1 -0.001];
+    data_tms_avg = ft_timelockanalysis(cfg, data_merged);
+
+    figure;
+    plot(data_tms_avg.time, data_tms_avg.avg(1,:)); 
+    xlim([-0.1 0.6]);     
+    ylim([-40 50]);      
+    title(['Channel ' data_tms_avg.label{1}]);
+    ylabel('Amplitude (uV)')
+    xlabel('Time (s)');
+   
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% STEP 3: Define artifacts & reject %%%%%%%%%%%%%%%%%
+%%
+triggers = {condition_peak, condition_trough, condition_falling,...
+            condition_rising, condition_sp_free}
+    for ises=1:length(session)
+        cfg = [];
+        cfg.datafile = [datapath, filesep, subjects{isub}, filesep, session{ises}, filesep, 'spindle-ppTMS_', subjects{isub}, '_', session{ises}, '.eeg']
+        cfg.headerfile = [datapath, filesep, subjects{isub}, filesep, session{ises}, filesep, 'spindle-ppTMS_', subjects{isub}, '_', session{ises}, '.vhdr']
+        cfg.method                  = 'marker'; 
+        cfg.prestim                 = .001;     
+        cfg.poststim                = .02;    
+        cfg.trialdef.eventtype      = 'Stimulus';
+        cfg.trialdef.eventvalue     = triggers;
+        cfg_ringing = ft_artifact_tms(cfg);  
+        
+        cfg_artifact = [];
+        cfg_artifact.datafile = [datapath, filesep, subjects{isub}, filesep, session{ises}, filesep, 'spindle-ppTMS_', subjects{isub}, '_', session{ises}, '.eeg']
+        cfg_artifact.headerfile = [datapath, filesep, subjects{isub}, filesep, session{ises}, filesep, 'spindle-ppTMS_', subjects{isub}, '_', session{ises}, '.vhdr']
+        cfg_artifact.artfctdef.ringing.artifact = cfg_ringing.artfctdef.tms.artifact; % Add ringing/step response artifact definition
+
+        cfg_artifact.artfctdef.reject = 'partial'; 
+        datafile = fullfile(datapath, subjects{isub}, session{ises}, ['data_', subjects{isub}, '_', session{ises}, '_C4.mat']);
+        loaded_data = load(datafile, "data_raw_c4");
+        cfg_artifact.trl = loaded_data.data_raw_c4.cfg.trl  
+        cfg_artifact.artfctdef.minaccepttim = 0.01;
+        cfg = ft_rejectartifact(cfg_artifact)
+        cfg.channel     = {'all'};
+        cfg.reref       = 'yes';
+        cfg.refchannel  = {'TP9', 'TP10'};
+        data_tms_clean  = ft_preprocessing(cfg);
+        save([datapath, filesep, subjects{isub}, filesep, session{ises}, filesep, 'data_', subjects{isub}, '_', session{ises}, '_ringing_clean'], "data_tms_clean", '-v7.3')
+    end 
+    data_to_append_2 = cell(length(session), 1); 
+    for ises = 1:length(session)
+        datafile = fullfile(datapath, subjects{isub}, session{ises}, ['data_', subjects{isub}, '_', session{ises}, '_ringing_clean.mat']);
+        loaded_data = load(datafile, "data_tms_clean");
+        data_to_append_2{ises} = loaded_data.data_tms_clean;
+    end
+    cfg = [];
+    data_merged_2 = ft_appenddata(cfg, data_to_append_2{:}); % merge all three datasets
+    for i=21:size(data_merged_2.sampleinfo,1)-20
+        data_merged_2.sampleinfo(i,:) = data_merged_2.sampleinfo(20,:) + data_merged_2.sampleinfo(i,:)
+    end 
+    
+    for i=145:size(data_merged_2.sampleinfo,1)
+        data_merged_2.sampleinfo(i,:) = data_merged_2.sampleinfo(144,:) + data_merged_2.sampleinfo(i,:)
+    end 
+
+
+    cfg = [];
+    cfg.preproc.demean = 'yes';
+    cfg.preproc.baselinewindow = [-0.1 -0.001];
+    data_tms_avg_ringing_clean = ft_timelockanalysis(cfg, data_merged_2);
+
+    figure;
+    plot(data_tms_avg_ringing_clean.time, data_tms_avg_ringing_clean.avg(find(contains(data_tms_avg_ringing_clean.label,'C4')),:))
+    % xlim([-0.1 0.6]);     
+    % ylim([-40 50]);      
+    title(['Channel: C4']);
+    ylabel('Amplitude (uV)')
+    xlabel('Time (s)');
+   
+
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% STEP 4: Perform ICA to remove remaining artifacts %%%%%%%%%%%%%%%%%
+
+    cfg = [];
+    cfg.demean = 'yes';
+    cfg.method = 'fastica';       
+    cfg.fastica.approach = 'symm'; 
+    cfg.fastica.g = 'gauss';
+    
+    comp_tms = ft_componentanalysis(cfg, data_merged_2);
+    
+    save('comp_tms','comp_tms','-v7.3');
+    
+    % compute TLA and look at timecourse of each component
+    cfg = [];
+    comp_tms_avg = ft_timelockanalysis(cfg, comp_tms);
+    figure;
+    cfg = [];
+    cfg.viewmode = 'butterfly';
+    ft_databrowser(cfg, comp_tms_avg);
+    
+    
+    % look at topography for components
+    comp_tms_2 = comp_tms
+    comp_tms_2.unmixing(:,1:64) = comp_tms_2.unmixing(:,1:64)
+    comp_tms_2.topolabel = comp_tms_2.topolabel(1:64,:)
+    figure;
+    cfg           = [];
+    cfg.component = [1:69];
+    cfg.comment   = 'no';
+    cfg.layout    = 'acticap-64ch-standard2.mat'; 
+    ft_topoplotIC(cfg, comp_tms_2);
+    
+    % look at non-timelocked data
+    cfg          = [];
+    cfg.layout   = 'acticap-64ch-standard2.mat'
+    cfg.viewmode = 'component'; % Mode specifically suited to browse through ICA data
+    ft_databrowser(cfg, comp_tms_2);
+     
+    
+    % we demeaned data before ICA, so we need to transform raw data agin to
+    % component data without demeaning
+    cfg          = [];
+    cfg.demean   = 'no'; 
+    cfg.unmixing = comp_tms.unmixing; 
+    cfg.topolabel = comp_tms.topolabel; 
+    
+    comp_tms          = ft_componentanalysis(cfg, data_merged_2);
+    
+    cfg            = [];
+    cfg.component  = [ 1 4 39 27];
+    cfg.demean     = 'no';
+    
+    data_merged_2_clean = ft_rejectcomponent(cfg, comp_tms); % remove components
+    
+    % look at electrode C4 for cleaned data
+    cfg                = [];
+    % cfg.vartrllength   = 2;
+    cfg.preproc.demean = 'no';
+    data_tms_clean_avg = ft_timelockanalysis(cfg, data_merged_2_clean);
+
+    figure;
+    plot(data_tms_clean_avg.time, data_tms_clean_avg.avg(find(contains(data_tms_clean_avg.label,'C4')),:),'b'); % Plot all data
+    xlim([-0.1 0.6]); 
+    % ylim([-40 50])
+    title(['Channel C4']);
+    ylabel('Amplitude (uV)')
+    xlabel('Time (s)');
+
+end
+
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% STEP 5: Interpolation %%%%%%%%%%%%%%%%%
+
+% recreate original data structure 
+% cfg     = [];
+% cfg.trl = data_merged.sampleinfo;
+% cfg.trl(:,3) = ones(size(cfg.trl,1),1)*(-1500)
+% cfg.trl(:,4) = data_merged.trialinfo
+% data_tms_clean = ft_redefinetrial(cfg, data_merged_2_clean);
+% % merge consecutive trials together
+% data_merged_2_clean_copy = data_merged_2_clean
+% for itrial=1:2:length(data_merged_2_clean_copy.trial)-1
+%     data_merged_2_clean_copy.trial{itrial} = [data_merged_2_clean_copy.trial{itrial}(70,1495),NaN(70,105),data_merged_2_clean_copy.trial{itrial+1}(70,4900)]
+% end 
+data_merged_2_clean_copy = data_merged_2_clean;
+new_trial_cell = cell(1, 82); 
+for itrial = 1:2:length(data_merged_2_clean_copy.trial)-1
+    new_trial_cell{(itrial+1)/2} = [data_merged_2_clean_copy.trial{itrial}, ...
+                                    NaN(70,105), ...
+                                    data_merged_2_clean_copy.trial{itrial+1}];
+end
+data_merged_2_clean_copy.trial = new_trial_cell;
+data_merged_2_clean_copy.time = data_merged.time;
+data_merged_2_clean_copy.trialinfo = data_merged.trialinfo;
+trial_matrix = [data_merged.sampleinfo, ones(length(data_merged_2_clean_copy.trial),1)*(-1500), data_merged_2_clean_copy.trialinfo]
+ 
+% Interpolate nans using cubic interpolation
+cfg = [];
+cfg.method = 'cubic'; 
+cfg.prewindow = 0.01; % Window prior to segment to use data points for interpolation
+cfg.postwindow = 0.01; % Window after segment to use data points for interpolation
+data_tms_clean = ft_interpolatenan(cfg, data_merged_2_clean_copy); 
+
+save([datapath, filesep, subjects{isub}, filesep, 'data_', subjects{isub}, '_', 'all_ses', '_TMS_clean'], "data_tms_clean", '-v7.3')
+fiff_file  = 'data_tms_clean.fif';
+fieldtrip2fiff(fiff_file, data_tms_clean)
+writematrix(trial_matrix, [datapath, filesep, subjects{isub}, filesep, 'data_', subjects{isub}, '_', 'all_ses', '_trialmatrix.csv'])
+
+% compute the TEP on the cleaned data
+cfg = [];
+cfg.preproc.demean = 'yes';
+cfg.preproc.baselinewindow = [-0.05 -0.001];
+data_tms_clean_avg = ft_timelockanalysis(cfg, data_merged_2_clean_copy);
+
+figure;
+plot(data_tms_clean_avg.time, data_tms_clean_avg.avg(find(contains(data_tms_clean_avg.label,'C4')),:),'b'); % Plot all data
+xlim([-0.1 0.6]); 
+% ylim([-40 50])
+title(['Channel C4']);
+ylabel('Amplitude (uV)')
+xlabel('Time (s)');
