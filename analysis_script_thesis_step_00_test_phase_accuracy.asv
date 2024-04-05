@@ -21,9 +21,6 @@ condition_trough = 'S156'
 condition_rising = 'S157'
 condition_falling = 'S158'
 condition_sp_free = 'S159'
-
-% individual spindle frequency
-sp_freq = 12.9
 %% main analysis
 % look at markers in dataset and segment based on markers
 for isub=1:length(subjects)
@@ -46,6 +43,8 @@ for isub=1:length(subjects)
         cfg.channel = {'C4', 'TP9'};
         cfg.reref = 'yes'
         cfg.refchannel = 'TP9'
+        cfg.demean = 'yes' % test
+        cfg.baselinewindow = [-0.05 -0.005] % test whether this has an effect
         % cfg.bpfilter = 'yes'
         % cfg.bpfiltord = 2
         % cfg.bpfreq = [10.9 14.9]
@@ -58,21 +57,16 @@ end
 data_C4_ses01 = load([datapath, filesep, subjects{isub}, filesep, session{1}, filesep, 'data_', subjects{isub}, '_', session{1}, '_C4'])
 data_C4_ses02 = load([datapath, filesep, subjects{isub}, filesep, session{2}, filesep, 'data_', subjects{isub}, '_', session{2}, '_C4'])
 data_C4_ses03 = load([datapath, filesep, subjects{isub}, filesep, session{3}, filesep, 'data_', subjects{isub}, '_', session{3}, '_C4'])
-data_C4_all_ses = [data_C4_ses01.data_raw_c4.trial data_C4_ses02.data_raw_c4.trial data_C4_ses03.data_raw_c4.trial] %concatenate recordings
+data_C4_all_ses = [data_C4_ses01.data_raw_c4.trial data_C4_ses02.data_raw_c4.trial data_C4_ses03.data_raw_c4.trial]
 data_C4_all_ses_trialinfo = zeros(length(data_C4_all_ses),1)
-data_C4_all_ses_trialinfo = [data_C4_ses01.data_raw_c4.trialinfo; data_C4_ses02.data_raw_c4.trialinfo; data_C4_ses03.data_raw_c4.trialinfo] %concatenate trialinfo
+data_C4_all_ses_trialinfo = [data_C4_ses01.data_raw_c4.trialinfo; data_C4_ses02.data_raw_c4.trialinfo; data_C4_ses03.data_raw_c4.trialinfo]
 
 
 % filter the data in the spindle frequency range
-for itrial=1:length(data_C4_all_ses)
-    data_C4_all_ses{itrial} = bandpass(data_C4_all_ses{itrial}(1,:),[sp_freq-2 sp_freq+2],sf)
-end 
+% for itrial=1:length(data_C4_all_ses)
+%     data_C4_all_ses{itrial} = bandpass(data_C4_all_ses{itrial}(1,:),[12 15],sf)
+% end 
 
-% plot all the trials
-for itrial=1:length(data_C4_all_ses)
-    figure;
-    plot(data_C4_all_ses{itrial})
-end 
 
 
 %% extract the phase for each trial
@@ -84,6 +78,10 @@ for itrial = 1:length(data_C4_all_ses)
     xphase_unwrap(itrial, :) = (unwrap(angle(xh(itrial,:))));
     xphase(itrial, :) = angle(xh(itrial,:))
 end 
+
+%wrap to -1.5*pi .. 0.5*pi 
+% estphase = xphase
+% estphase(estphase > 0.5*pi) = estphase(estphase > 0.5*pi)-(2*pi);
 
 % get phase for each condition 
 conditions = {condition_peak, condition_trough, condition_rising,...
@@ -112,7 +110,7 @@ colors = {'.g', '.b', '.r', '.k', '.y'}
 figure;
 for i=1:numel(conditions)
     for itrial = 1:size(trials{i},1)
-        h(i) = plot(plot_positions(i), trials{i}(itrial, 2.5*sf-0.0004*sf), colors{i}, 'MarkerSize', 10) % phase 0.004s before TMS pulse to avoid artifact
+        h(i) = plot(plot_positions(i), trials{i}(itrial, 1450), colors{i}, 'MarkerSize', 10)
         hold on; 
     end 
 end 
@@ -130,23 +128,22 @@ grid on;
 % for unwrapped phase 
 % plot_positions = [0.5, 1, 1.5, 2]
 % colors = {'.g', '.b', '.r', '.k'}
-trials_list = {trials_peak_unwrap, trials_falling_unwrap, trials_trough_unwrap, trials_rising_unwrap}
 figure;
-for i=1:numel(trials_list)
-    for itrial = 1:size(trials_list{i},1)
-        h(i) = plot(plot_positions(i), trials_list{i}(itrial, 2.5*sf-0.0004*sf), colors{i}, 'MarkerSize', 10)
+for i=1:numel(conditions)
+    for itrial = 1:size(trials{i},1)
+        h(i) = plot(plot_positions(i), trials_unwrap{i}(itrial, 1450), colors{i}, 'MarkerSize', 10)
         hold on; 
     end 
 end  
 hold on; 
 t = linspace(0, 2*pi, 1000);
-x = (200-194)/2 * cos(t) + (200+194)/2; % create cosine wave for reference 
+x = (28-24)/2 * cos(t) + (28+24)/2; % create cosine wave for reference 
 plot(t/pi + 0.5, x, 'LineWidth', 1.5, 'Color', [0.5, 0.5, 0.5]); 
 xlim([0.4 2.6])
 xlabel('targeted phase', 'FontSize', 12); 
 ylabel('estimated phase (radians)', 'FontSize', 12); 
 title('Comparison of Estimated Phase (unwrapped) with Cosine Wave', 'FontSize', 14); 
-h = legend(h, {'Peak', 'Falling', 'Trough', 'Rising', 'Post'}, ...
+h = legend(h, {'Peak', 'Trough', 'Rising', 'Falling', 'Post'}, ...
            'FontSize', 10, 'Location', 'best')
 grid on; 
 
@@ -156,9 +153,9 @@ titles = {'peak stimulation', 'trough stimulation', 'rising flank stimulation', 
     'falling flank stimulation'}
 for i=1:numel(conditions)-1
     subplot(2,2,i)
-    std_peak = circ_std(trials{i}(:, 2.5*sf-0.0004*sf), [], [], 1)
-    mean_peak = circ_mean(trials{i}(:, 2.5*sf-0.0004*sf))
-    circ_plot(trials{i}(:, 2.5*sf-0.0004*sf), 'pretty', 'bo', true,'linewidth',2,'color','b')
+    std_peak = circ_std(trials{i}(:, 1500), [], [], 1)
+    mean_peak = circ_mean(trials{i}(:, 1500))
+    circ_plot(trials{i}(:, 1500), 'pretty', 'bo', true,'linewidth',2,'color','b')
     hold on; 
     text(1.3, 0.8, sprintf('SD: %.2f\nMean: %.2f', std_peak, mean_peak), 'FontSize', 10);
     hold off; 

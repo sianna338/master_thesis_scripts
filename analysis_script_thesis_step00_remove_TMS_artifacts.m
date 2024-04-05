@@ -21,7 +21,6 @@ condition_falling = 'S158'
 condition_sp_free = 'S159'
  
 
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% STEP 1: LOAD IN DATA %%%%%%%%%%%%%%%%%
 % look at markers in dataset and segment based on markers
 for isub=1:length(subjects)
@@ -30,8 +29,8 @@ for isub=1:length(subjects)
         cfg.datafile = [datapath, filesep, subjects{isub}, filesep, session{ises}, filesep, 'spindle-ppTMS_', subjects{isub}, '_', session{ises}, '.eeg']
         cfg.headerfile = [datapath, filesep, subjects{isub}, filesep, session{ises}, filesep, 'spindle-ppTMS_', subjects{isub}, '_', session{ises}, '.vhdr']
         cfg.continous = 'yes';
-        cfg.trialdef.prestim = 0.3
-        cfg.trialdef.poststim = 1
+        cfg.trialdef.prestim = 2.5
+        cfg.trialdef.poststim = 2
         cfg.trialdef.eventtype = 'Stimulus';
         cfg.trialdef.eventvalue = {condition_peak, condition_trough, condition_falling,...
             condition_rising, condition_sp_free}
@@ -254,11 +253,18 @@ cfg.postwindow = 0.01; % Window after segment to use data points for interpolati
 data_tms_clean = ft_interpolatenan(cfg, data_merged_2_clean_copy); 
 
 save([datapath, filesep, subjects{isub}, filesep, 'data_', subjects{isub}, '_', 'all_ses', '_TMS_clean'], "data_tms_clean", '-v7.3')
-fiff_file  = 'data_tms_clean.fif';
+fiff_file  = 'data_tms_clean_segmented.fif';
 fieldtrip2fiff(fiff_file, data_tms_clean)
 writematrix(trial_matrix, [datapath, filesep, subjects{isub}, filesep, 'data_', subjects{isub}, '_', 'all_ses', '_trialmatrix.csv'])
 
-% compute the TEP on the cleaned data
+% change structure of the data to be one continous recording 
+trial_matrix_one_trial = [1 1845000 0]
+cfg = [];
+cfg.trl = trial_matrix_one_trial
+data_tms_clean_unsegmented = ft_redefinetrial(cfg, data_tms_clean)
+fiff_file  = 'data_tms_clean_unsegmented.fif';
+fieldtrip2fiff(fiff_file, data_tms_clean_unsegmented) % compute the TEP on the cleaned data
+
 cfg = [];
 cfg.preproc.demean = 'yes';
 cfg.preproc.baselinewindow = [-0.05 -0.001];
