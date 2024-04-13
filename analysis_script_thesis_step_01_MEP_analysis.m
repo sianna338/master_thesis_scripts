@@ -44,7 +44,6 @@ for isub=1:length(subjects)
         cfg.channel = {'FDIr'};
         data_MEPs = ft_selectdata(cfg, data_raw)
         for i = 1:numel(data_MEPs.trial)
-            plot(data_MEPs.trial{i}(1,:))
             min_val = min(data_MEPs.trial{i}(1,:));
             max_val = max(data_MEPs.trial{i}(1,:));
             data_MEPs.mep(i,1) = abs(min_val) + abs(max_val);
@@ -68,8 +67,8 @@ for isub = 1:numel(subjects)
 
     % calculate z-scores and remove outliers if needed
     data_MEPs_conds(:,3) = zscore(data_MEPs_conds(:,1));
-    threshold = 1.5
-    ; 
+    save([datapath, filesep, subjects{isub}, filesep,'data_', subjects{isub}, '_all_ses_MEP_trialwise'], 'data_MEPs_conds', '-v7.3');
+    threshold = 1.5; 
     non_outliers = (abs(data_MEPs_conds(:,3)) < threshold)
     data_MEPs_conds = data_MEPs_conds(non_outliers,:) 
 
